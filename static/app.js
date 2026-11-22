@@ -1,0 +1,21 @@
+let zones=[], map, markers=[], mode='balanced', latestBudget=150;
+const $=id=>document.getElementById(id);
+function heatColor(t){return t>=40?'#df6854':t>=38.5?'#e99b48':'#35a995'}
+async function init(){
+  const r=await fetch('/api/zones'); const data=await r.json(); zones=data.zones;
+  $('kpi-zones').textContent=String(zones.length).padStart(2,'0');
+  $('kpi-temp').textContent=Math.max(...zones.map(z=>z.lst_c)).toFixed(1)+'°C';
+  $('kpi-risk').textContent='High';
+  if(window.L){map=L.map('map',{zoomControl:true}).setView([13.02,80.22],11);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+    zones.forEach(z=>{const c=heatColor(z.lst_c);const m=L.circleMarker([z.lat,z.lon],{radius:10,fillColor:c,color:'#fff',weight:2,opacity:1,fillOpacity:.88}).addTo(map);m.bindPopup(`<b>${z.name}</b><br>Demo LST: ${z.lst_c}°C<br>NDVI: ${z.ndvi}<br>Vulnerability index: ${z.vulnerability}`);markers.push(m)});
+  }else{$('map').innerHTML='<div style="padding:30px;color:#667">Map library unavailable. Zone data is still available in the optimizer.</div>'}
+  $('budget').addEventListener('input',e=>{latestBudget=+e.target.value;$('budget-label').textContent=`₹${latestBudget} crore`;$('kpi-budget').textContent=`₹${latestBudget} Cr`});
+  document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-mode]').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');mode=b.dataset.mode}));
+  $('run').addEventListener('click',run);$('compare').addEventListener('click',compare);$('download').addEventListener('click',downloadReport);$('hide-compare').addEventListener('click',()=>$('scenario-panel').hidden=true);
+  run();
+}
+async function run(){latestBudget=+$('budget').value;$('run').disabled=true;$('run').textContent='Optimizing…';try{const r=await fetch('/api/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({budget_crore:latestBudget,mode})});const d=await r.json();if(!r.ok)throw Error(d.detail||'Optimization failed');render(d)}catch(e){alert(e.message)}finally{$('run').disabled=false;$('run').innerHTML='Generate optimized strategy <span>→</span>'}}
+function render(d){$('scenario-name').textContent=mode.toUpperCase()+' SCENARIO';$('allocated').textContent='₹'+d.allocated_crore+' Cr';$('interventions').textContent=d.summary.interventions;$('covered').textContent=d.summary.zones_covered;$('population').textContent=d.summary.population_reached_millions+'M';const body=$('portfolio-body');body.innerHTML='';if(!d.portfolio.length){body.innerHTML='<tr><td colspan="4" class="empty">Budget too small for the current demo intervention assumptions.</td></tr>';return}d.portfolio.forEach(p=>{const tr=document.createElement('tr');[p.zone,p.intervention,'₹'+p.cost_crore+' Cr',p.why].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td)});body.appendChild(tr)})}
+async function compare(){const r=await fetch('/api/scenarios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({budget_crore:+$('budget').value,mode:'balanced'})});const d=await r.json();const box=$('scenario-cards');box.innerHTML='';d.scenarios.forEach(s=>{const el=document.createElement('div');el.className='scenario-card';el.innerHTML=`<h4>${s.label}</h4><strong>₹${s.allocated_crore} Cr</strong><p>${s.summary.interventions} interventions across ${s.summary.zones_covered} zones<br>Cooling index: ${s.summary.cooling_index}<br>Renewable energy index: ${s.summary.renewable_energy_index}<br>Resilience index: ${s.summary.resilience_index}</p>`;box.appendChild(el)});$('scenario-panel').hidden=false;$('scenario-panel').scrollIntoView({behavior:'smooth',block:'nearest'})}
+async function downloadReport(){const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({budget_crore:+$('budget').value,mode})});const t=await r.text();const blob=new Blob([t],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='UCSE_Chennai_Illustrative_Policy_Report.txt';a.click();URL.revokeObjectURL(a.href)}
+init().catch(e=>console.error(e));
